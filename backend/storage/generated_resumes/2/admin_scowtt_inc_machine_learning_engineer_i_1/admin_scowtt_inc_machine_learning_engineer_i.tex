@@ -1,0 +1,187 @@
+\documentclass[a4paper,10pt]{article}
+
+% ---------- Packages ----------
+\usepackage[margin=0.45in]{geometry}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{tgtermes}
+\usepackage[T1]{fontenc}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{array}
+
+% ---------- Page Setup ----------
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0pt}
+
+\hypersetup{
+    colorlinks=true,
+    urlcolor=blue,
+    linkcolor=blue,
+    citecolor=blue
+}
+
+% ---------- Section Formatting ----------
+\titleformat{\section}
+  {\Large\scshape}
+  {}
+  {0em}
+  {}
+  [\titlerule]
+
+\titlespacing*{\section}{0pt}{3pt}{3pt}
+
+% ---------- List Formatting ----------
+\setlist[itemize]{
+    leftmargin=1.2em,
+    itemsep=1pt,
+    topsep=2pt,
+    parsep=0pt,
+    partopsep=0pt
+}
+
+\renewcommand\labelitemi{$\bullet$}
+
+% ---------- Custom Commands ----------
+\newcommand{\resumeHeader}[8]{
+    \begin{center}
+        {\LARGE \textbf{#1}}\\
+        \href{mailto:#2}{#2} \,|\, #3 \,|\, \href{#4}{LinkedIn} \,|\, \href{#5}{GitHub} \,|\, \href{#6}{LeetCode}\\
+        #7\\
+        #8
+    \end{center}
+}
+
+\newcommand{\resumeSubheading}[4]{
+    \textbf{#1} \hfill #2\\
+    \textit{#3} \hfill #4
+}
+
+\newcommand{\resumeProjectHeading}[3]{
+    \textbf{#1}\\
+    \textit{#2} \hfill #3
+}
+
+\newcommand{\resumeEducationHeading}[4]{
+    \textbf{#1} \hfill #2\\
+    #3\\
+    #4
+}
+
+\newcommand{\skillLine}[2]{%
+    \noindent\textbf{#1:} #2\par\vspace{0pt}%
+}
+
+% ---------- Document ----------
+\begin{document}
+\vspace*{-35pt}
+
+% ---------- Header ----------
+\resumeHeader
+{Prerak Patel}
+{patel.prerak2798@gmail.com}
+{+1 (321) 610-0582}
+{https://www.linkedin.com/in/prerakpatel51020021998/}
+{https://github.com/prerakpatel51}
+{https://leetcode.com/u/PrerakPatel510/}
+{Machine Learning Engineer \,|\, Deep Learning \,|\, Python}
+{Melbourne, Florida \,|\, Permanent Resident, U.S. Person}
+
+\vspace{-8pt}
+
+% ---------- Summary ----------
+\section*{Summary}
+Machine Learning Engineer with hands-on experience building end-to-end ML workflows from data ingestion and preprocessing to training, evaluation, and scalable execution. Strong in \textbf{Python}, \textbf{PyTorch}, time-series forecasting, and generative modeling (VAE, Diffusion, Conditional Flow Matching) on large geospatial and radar/satellite datasets. Delivered reproducible pipelines with experiment tracking, multi-GPU training on Slurm HPC, and latency/performance improvements in backend systems. Comfortable working across research-to-product engineering with \textbf{AWS}, \textbf{Docker}, and modern ML tooling.
+
+% ---------- Skills ----------
+\section*{Skills}
+\skillLine{Languages}{\textbf{Python}, C++, Java, SQL, JavaScript}
+\skillLine{Machine Learning}{\textbf{Machine Learning}, \textbf{Deep Learning}, Supervised Learning, Time-Series Forecasting, NLP, Sentiment Analysis, Feature Engineering, Model Evaluation}
+\skillLine{Frameworks}{\textbf{PyTorch}, TensorFlow, Keras, Scikit-Learn}
+\skillLine{Data \& Visualization}{NumPy, Pandas, Polars, Dask, SciPy, Statsmodels, Matplotlib, Plotly, OpenCV}
+\skillLine{MLOps / DevOps}{\textbf{AWS}, \textbf{Docker}, Kubernetes, Git, CI/CD, MLflow, Hugging Face Spaces, Gradio}
+\skillLine{Backend}{Django, RESTful APIs, Redis, PostgreSQL}
+\skillLine{Compute}{Slurm, GPU Clusters, Multi-GPU Training}
+\vspace{-2pt}
+
+% ---------- Work Experience ----------
+\section*{Work Experience}
+
+\resumeSubheading
+{Florida Institute of Technology, Melbourne, FL}
+{April 2026 -- Present}
+{Research Assistant}
+{Advisor: Dr. Yang}
+\begin{itemize}
+    \item Building \textbf{Python} ML and time-series pipelines for cryptocurrency and stock market forecasting using NLP preprocessing, feature engineering, regression/classification, and model evaluation.
+    \item Performing financial sentiment analysis on news/social/financial text to study relationships between sentiment signals and asset price movement.
+\end{itemize}
+
+\resumeSubheading
+{Florida Institute of Technology, Melbourne, FL}
+{May 2025 -- Present}
+{Graduate Research Assistant}
+{Advisor: Dr. Georgios C. Anagnostopoulos}
+\begin{itemize}
+    \item Built scalable data pipelines to download, organize, and preprocess $\sim$10 years of IMERG precipitation and IR satellite data into analysis-ready geospatial-temporal tensors, reducing manual preparation effort by 70\%.
+    \item Designed and trained \textbf{PyTorch} generative models (VAE, Diffusion, Latent Diffusion) for nowcasting/flash-flood prediction, compressing high-dimensional sequences and reducing storage/memory by 35\%.
+    \item Implemented end-to-end multimodal forecasting workflows (preprocessing, training, checkpointing, evaluation, experiment logging) and executed multi-GPU \textbf{Slurm} runs to accelerate iteration by 50\%.
+    \item Implemented FlowCast radar nowcasting benchmark using Conditional Flow Matching with multi-GPU/multi-node Slurm workflows for scalable model training and evaluation.
+\end{itemize}
+
+\resumeSubheading
+{Matrixhive Technologies Pvt. Ltd., Ahmedabad, India}
+{January 2024 -- April 2024}
+{Python Developer Intern}
+{}
+\begin{itemize}
+    \item Developed Django backend modules and RESTful APIs for client-facing workflows; delivered 5+ production features across authentication, dashboards, forms, and admin tools.
+    \item Optimized database queries and integrated Redis caching, reducing API latency by 25\% and improving application responsiveness.
+\end{itemize}
+
+% ---------- Projects ----------
+\section*{Projects}
+
+\resumeProjectHeading
+{PKCast: Probabilistic Radar Nowcasting with Conditional Flow Matching}
+{\href{https://github.com/prerakpatel51/Pkcast.git}{GitHub Repository}}
+{2026}
+\begin{itemize}
+    \item Developed a \textbf{PyTorch}-based probabilistic radar nowcasting system for the SEVIR VIL dataset to forecast future storm activity from historical radar sequences.
+    \item Built a VAE-style autoencoder, generated HDF5 latent datasets, and trained a Conditional Flow Matching model with a Cuboid Transformer U-Net backbone for latent-space forecasting.
+    \item Implemented distributed GPU training, MLflow tracking, streaming metrics, Cartopy visualizations, and \textbf{Slurm} scripts for scalable cluster training.
+\end{itemize}
+
+\resumeProjectHeading
+{3D Variational Autoencoders for Satellite IMERG and IR Data}
+{\href{https://github.com/prerakpatel51/icp_neuralnetworks_project}{GitHub Repository}}
+{2025}
+\begin{itemize}
+    \item Designed and trained 3D $\beta$-VAE models on large-scale NASA IMERG precipitation and IR satellite data for spatiotemporal representation learning.
+    \item Processed over 1TB of geospatial data and optimized multi-GPU HPC workflows, reducing memory usage by 35\% and accelerating training by 50\%.
+\end{itemize}
+
+\resumeProjectHeading
+{Satellite Image Segmentation for Environmental Monitoring}
+{\href{https://github.com/prerakpatel51/satellite-image-segmentor}{GitHub Repository} | \href{https://huggingface.co/spaces/Prerak51/satellite_image_segmentor}{Live Demo}}
+{2024}
+\begin{itemize}
+    \item Built and deployed a U-Net-based satellite image segmentation system; achieved 86\% segmentation accuracy and deployed an interactive Gradio web interface.
+\end{itemize}
+
+% ---------- Education ----------
+\section*{Education}
+
+\textbf{Master of Science in Computer Engineering} \hfill January 2025 -- December 2026\\
+Florida Institute of Technology\\
+Melbourne, FL
+
+\vspace{3pt}
+
+\textbf{Bachelor of Engineering in Computer Engineering} \hfill May 2020 -- May 2024\\
+Gandhinagar Institute of Technology\\
+Gandhinagar, Gujarat, India
+
+\end{document}

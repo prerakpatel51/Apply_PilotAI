@@ -1,0 +1,75 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: api_applier
+      POSTGRES_PASSWORD: api_applier
+      POSTGRES_DB: api_applier
+    ports:
+      - "5432:5432"
+    volumes:
+      - api_applier_db:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - api_applier_redis:/data
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://api_applier:api_applier@db:5432/api_applier
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: change-me-in-production
+      ENCRYPTION_SECRET: change-me-in-production
+      BACKEND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
+      RATE_LIMIT_PER_MINUTE: "120"
+      SEARCH_RUNS_PER_HOUR: "10"
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-patel.prerak2798@gmail.com}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/storage:/app/storage
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build:
+      context: ./backend
+    command: ["arq", "app.worker.WorkerSettings"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://api_applier:api_applier@db:5432/api_applier
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: change-me-in-production
+      ENCRYPTION_SECRET: change-me-in-production
+    volumes:
+      - ./backend/storage:/app/storage
+    depends_on:
+      - db
+      - redis
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  api_applier_db:
+  api_applier_redis:
