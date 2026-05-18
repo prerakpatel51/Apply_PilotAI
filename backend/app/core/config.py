@@ -72,8 +72,6 @@ def _validate(settings: Settings) -> None:
         problems.append("BACKEND_CORS_ORIGINS must not contain '*' in production")
     if settings.debug:
         problems.append("DEBUG must be false in production")
-    if settings.storage_backend == "local":
-        problems.append("STORAGE_BACKEND must be 's3' in production")
     if settings.storage_backend == "s3" and not settings.s3_bucket:
         problems.append("S3_BUCKET must be set when STORAGE_BACKEND=s3")
     if settings.database_url.startswith("sqlite"):
