@@ -1,5 +1,7 @@
 # ApplyPilot AI
 
+**Live:** https://applypilotai.duckdns.org/signin
+
 ApplyPilot AI is a full-stack job-search and resume-alignment workspace. It helps a candidate search live job postings, rank them against a master resume, inspect gaps, and generate role-specific LaTeX resumes that can be edited, compiled, downloaded, and tracked over time.
 
 The product is built for a bring-your-own-key model: users connect their own OpenAI or Anthropic API key, and every agent run uses that user's browser-session provider key.
