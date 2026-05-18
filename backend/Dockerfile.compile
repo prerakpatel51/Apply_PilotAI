@@ -1,0 +1,32 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        texlive-latex-base \
+        texlive-latex-recommended \
+        texlive-latex-extra \
+        texlive-fonts-recommended \
+        tex-gyre \
+    && rm -rf /var/lib/apt/lists/*
+
+# Only deps the compile task touches.
+COPY requirements.txt .
+RUN pip install --no-cache-dir \
+        sqlalchemy \
+        psycopg[binary] \
+        pydantic-settings \
+        boto3 \
+        cryptography
+
+COPY app ./app
+
+RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+USER app
+
+CMD ["python", "-m", "app.compile_task"]

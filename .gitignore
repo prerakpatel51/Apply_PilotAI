@@ -12,3 +12,4 @@ backend/storage/resumes/*
 frontend/node_modules/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
+deploy/state.env

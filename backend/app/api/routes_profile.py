@@ -99,14 +99,14 @@ async def upload_resume(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    settings = get_settings()
     suffix = Path(file.filename).suffix.lower()
     relative_path = Path("resumes") / str(current_user.id) / f"{uuid4().hex}{suffix}"
-    destination = Path(settings.storage_dir) / relative_path
-    await save_upload(file, destination)
+    data = await _read_upload_bytes(file)
+    from app.services import storage as _storage
+    _storage.put_bytes(str(relative_path), data, content_type=file.content_type or "application/octet-stream")
 
     try:
-        extracted_text = extract_resume_text(destination, file.content_type)
+        extracted_text = _decode_resume_bytes(data)
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Could not read resume: {exc}") from exc
 
@@ -143,6 +143,8 @@ def delete_resume(
     resume = db.scalar(select(Resume).where(Resume.id == resume_id, Resume.user_id == current_user.id))
     if resume is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resume not found.")
+    from app.services import storage as _storage
+    _storage.delete(resume.file_path)
     db.delete(resume)
     db.commit()
     return MessageResponse(message="Resume deleted.")
@@ -233,3 +235,24 @@ def _resume_response(resume: Resume) -> ResumeResponse:
         extracted_preview=preview,
         created_at=resume.created_at,
     )
+
+
+async def _read_upload_bytes(upload) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    max_bytes = 5 * 1024 * 1024  # 5 MB hard cap
+    while chunk := await upload.read(1024 * 1024):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Resume exceeds 5 MB.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _decode_resume_bytes(data: bytes) -> str:
+    for encoding in ("utf-8", "utf-16", "latin-1"):
+        try:
+            return data.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore").strip()

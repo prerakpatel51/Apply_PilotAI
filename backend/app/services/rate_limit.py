@@ -59,6 +59,47 @@ async def enforce_request_rate_limit(user_id: int) -> None:
         )
 
 
+async def enforce_login_throttle(identifier: str) -> None:
+    """Block login attempts after too many failures. identifier = email|ip."""
+    settings = get_settings()
+    limit = settings.login_fail_limit
+    if limit <= 0:
+        return
+    window = settings.login_fail_window_seconds
+    key = f"rl:login:{identifier.lower()}"
+    client = _redis()
+    if client is None:
+        return
+    try:
+        count = int(await client.get(key) or 0)
+    except Exception:
+        return
+    if count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed sign-in attempts. Try again later.",
+        )
+
+
+async def record_login_failure(identifier: str) -> None:
+    settings = get_settings()
+    if settings.login_fail_limit <= 0:
+        return
+    window = settings.login_fail_window_seconds
+    key = f"rl:login:{identifier.lower()}"
+    await _incr_window(key, window)
+
+
+async def clear_login_failures(identifier: str) -> None:
+    client = _redis()
+    if client is None:
+        return
+    try:
+        await client.delete(f"rl:login:{identifier.lower()}")
+    except Exception:
+        return
+
+
 async def enforce_search_rate_limit(user_id: int, limit: int) -> None:
     if limit <= 0:
         return

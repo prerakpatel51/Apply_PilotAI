@@ -7,7 +7,7 @@ import subprocess
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,8 @@ from app.services.agent_prompts import extra_block, get_prompt_bundle
 from app.services.json_utils import loads_json
 from app.services.prompt_injection import sanitize_untrusted_text, untrusted_block
 from app.services.providers import make_provider
+from app.services import storage
+from app.services.compile_dispatcher import dispatch_compile
 
 
 router = APIRouter(prefix="/resume-alignments", tags=["resume-alignments"])
@@ -145,9 +147,7 @@ def generate_resume_for_match(
     file_base = _file_base(current_user, match)
     relative_dir = Path("generated_resumes") / str(current_user.id) / f"{file_base}_{match.id}"
     latex_path = relative_dir / f"{file_base}.tex"
-    destination = Path(get_settings().storage_dir) / latex_path
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(latex_source, encoding="utf-8")
+    storage.put_text(str(latex_path), latex_source, content_type="application/x-tex")
 
     generated = GeneratedResume(
         user_id=current_user.id,
@@ -205,7 +205,7 @@ def update_generated_resume(
     generated.latex_source = payload.latex_source
     generated.compile_status = "not_compiled"
     generated.compile_log = ""
-    _latex_file(generated).write_text(payload.latex_source, encoding="utf-8")
+    storage.put_text(generated.latex_path, payload.latex_source, content_type="application/x-tex")
     db.commit()
     db.refresh(generated)
     return _generated_response(generated)
@@ -229,12 +229,9 @@ def delete_generated_resume(
     db: Annotated[Session, Depends(get_db)],
 ) -> dict[str, str]:
     generated = _generated_for_user(db, generated_id, current_user.id)
-    for path in _generated_files(generated):
-        try:
-            if path.exists():
-                path.unlink()
-        except OSError:
-            pass
+    storage.delete(generated.latex_path)
+    if generated.pdf_path:
+        storage.delete(generated.pdf_path)
     db.delete(generated)
     db.commit()
     return {"message": "Generated resume deleted."}
@@ -249,20 +246,28 @@ def download_generated_resume(
 ) -> FileResponse:
     generated = _generated_for_user(db, generated_id, current_user.id)
     if kind == "tex":
-        path = _latex_file(generated)
+        key = generated.latex_path
         media_type = "application/x-tex"
         filename = f"{generated.file_base}.tex"
     elif kind == "pdf":
         if not generated.pdf_path:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF has not been compiled yet.")
-        path = Path(get_settings().storage_dir) / generated.pdf_path
+        key = generated.pdf_path
         media_type = "application/pdf"
         filename = f"{generated.file_base}.pdf"
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Download kind must be 'tex' or 'pdf'.")
-    if not path.exists():
+    if not storage.exists(key):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Generated file not found.")
-    return FileResponse(path, media_type=media_type, filename=filename)
+    if get_settings().storage_backend == "s3":
+        url = storage.presigned_url(key, expires=300)
+        if url:
+            return RedirectResponse(url, status_code=302)
+    if get_settings().storage_backend == "local":
+        local = Path(get_settings().storage_dir) / key
+        return FileResponse(local, media_type=media_type, filename=filename)
+    data = storage.get_bytes(key)
+    return Response(content=data, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 def _match_for_user(db: Session, match_id: int, user_id: int) -> JobMatch:
@@ -292,56 +297,38 @@ def _generated_for_user(db: Session, generated_id: int, user_id: int) -> Generat
     return generated
 
 
-def _latex_file(generated: GeneratedResume) -> Path:
-    path = Path(get_settings().storage_dir) / generated.latex_path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _generated_files(generated: GeneratedResume) -> list[Path]:
-    storage = Path(get_settings().storage_dir)
-    paths = [storage / generated.latex_path]
-    if generated.pdf_path:
-        paths.append(storage / generated.pdf_path)
-    return paths
-
-
 def _compile_generated_resume(db: Session, generated: GeneratedResume) -> None:
-    tex_path = _latex_file(generated)
-    tex_path.write_text(generated.latex_source, encoding="utf-8")
-    if shutil.which("pdflatex") is None:
-        generated.compile_status = "missing_pdflatex"
-        generated.compile_log = "pdflatex is not installed in the backend container."
-        db.commit()
-        db.refresh(generated)
-        return
-
-    try:
-        result = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", "-halt-on-error", tex_path.name],
-            cwd=tex_path.parent,
-            text=True,
-            capture_output=True,
-            timeout=30,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        generated.compile_status = "failed"
-        generated.compile_log = f"pdflatex timed out: {exc}"
-        db.commit()
-        db.refresh(generated)
-        return
-
-    raw_log = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
-    generated.compile_log = _friendly_compile_log(raw_log)
-    pdf_path = tex_path.with_suffix(".pdf")
-    if result.returncode == 0 and pdf_path.exists():
-        generated.compile_status = "compiled"
-        generated.pdf_path = str(Path(generated.latex_path).with_suffix(".pdf"))
-    else:
-        generated.compile_status = "failed"
+    # Persist source, mark pending, dispatch compile to an ephemeral worker.
+    # The worker process (local subprocess or ECS RunTask) updates the DB row
+    # with final status/pdf_path when done. In ECS mode the API call returns
+    # immediately while the task runs asynchronously.
+    storage.put_text(generated.latex_path, generated.latex_source, content_type="application/x-tex")
+    pdf_key = str(Path(generated.latex_path).with_suffix(".pdf"))
+    generated.compile_status = "pending"
+    generated.compile_log = ""
     db.commit()
     db.refresh(generated)
+
+    result = dispatch_compile(generated.id, generated.latex_path, pdf_key)
+
+    # Local mode finishes synchronously: re-read the row to surface the result.
+    if result.get("mode") == "local":
+        db.refresh(generated)
+        if result.get("returncode") not in (0, None) and generated.compile_status == "pending":
+            generated.compile_status = "failed"
+            generated.compile_log = _friendly_compile_log(
+                (result.get("stderr") or "") + (result.get("stdout") or "")
+            )
+            db.commit()
+            db.refresh(generated)
+        return
+
+    # ECS mode: status remains "pending" until the spawned task updates it.
+    if result.get("failures"):
+        generated.compile_status = "failed"
+        generated.compile_log = f"ECS RunTask failed: {result['failures']}"
+        db.commit()
+        db.refresh(generated)
 
 
 def _generated_response(generated: GeneratedResume) -> GeneratedResumeResponse:
@@ -355,7 +342,7 @@ def _generated_response(generated: GeneratedResume) -> GeneratedResumeResponse:
         latex_source=generated.latex_source,
         compile_status=generated.compile_status,
         compile_log=generated.compile_log or "",
-        has_pdf=bool(generated.pdf_path and (Path(get_settings().storage_dir) / generated.pdf_path).exists()),
+        has_pdf=bool(generated.pdf_path and storage.exists(generated.pdf_path)),
         model=generated.model,
         token_usage={
             "prompt_tokens": generated.prompt_tokens,
@@ -426,12 +413,12 @@ def _render_template(template: str, values: dict[str, str]) -> str:
 
 
 def _source_resume_text(resume: Resume) -> str:
-    path = Path(get_settings().storage_dir) / resume.file_path
-    if path.suffix.lower() == ".tex" and path.exists():
+    key = resume.file_path
+    if key.lower().endswith(".tex") and storage.exists(key):
         try:
-            return path.read_text(encoding="utf-8")
+            return storage.get_text(key)
         except UnicodeDecodeError:
-            return path.read_text(errors="ignore")
+            return storage.get_bytes(key).decode("utf-8", errors="ignore")
     return resume.extracted_text
 
 

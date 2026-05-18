@@ -681,15 +681,36 @@ async def system(
         "audit_logs": AuditLog,
     }
     rows = {name: int(db.scalar(select(func.count(model.id))) or 0) for name, model in tables.items()}
-    storage_dir = get_settings().storage_dir
-    total_bytes = 0
-    file_count = 0
+    total_bytes, file_count = _storage_usage()
+    return AdminSystem(db_rows=rows, storage_bytes=total_bytes, storage_files=file_count, queue=await _queue_stats())
+
+
+def _storage_usage() -> tuple[int, int]:
+    settings = get_settings()
+    if settings.storage_backend == "s3":
+        try:
+            import boto3
+            client = boto3.client("s3", region_name=settings.s3_region)
+            paginator = client.get_paginator("list_objects_v2")
+            total = 0
+            count = 0
+            prefix = (settings.s3_prefix or "").lstrip("/")
+            for page in paginator.paginate(Bucket=settings.s3_bucket, Prefix=prefix):
+                for obj in page.get("Contents", []) or []:
+                    total += int(obj.get("Size", 0))
+                    count += 1
+            return total, count
+        except Exception:
+            return 0, 0
+    storage_dir = settings.storage_dir
+    total = 0
+    count = 0
     if os.path.isdir(storage_dir):
         for root, _, files in os.walk(storage_dir):
             for f in files:
                 try:
-                    total_bytes += os.path.getsize(os.path.join(root, f))
-                    file_count += 1
+                    total += os.path.getsize(os.path.join(root, f))
+                    count += 1
                 except OSError:
                     pass
-    return AdminSystem(db_rows=rows, storage_bytes=total_bytes, storage_files=file_count, queue=await _queue_stats())
+    return total, count

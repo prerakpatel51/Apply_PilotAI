@@ -14,3 +14,5 @@ anthropic>=0.52.0
 httpx>=0.28.0
 redis>=5.0.0
 arq>=0.26.0
+alembic>=1.13.0
+boto3>=1.35.0

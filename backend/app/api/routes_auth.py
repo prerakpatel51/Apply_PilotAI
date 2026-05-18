@@ -6,7 +6,7 @@ import smtplib
 import ssl
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -35,9 +35,19 @@ from app.schemas.api import (
     TokenResponse,
     UserResponse,
 )
+from app.services.rate_limit import (
+    clear_login_failures,
+    enforce_login_throttle,
+    record_login_failure,
+)
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _login_identifier(request: Request, email: str) -> str:
+    ip = request.client.host if request.client else "unknown"
+    return f"{email.lower()}|{ip}"
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -54,15 +64,23 @@ def signup(payload: SignupRequest, db: Annotated[Session, Depends(get_db)]) -> T
     db.add(user)
     db.commit()
     db.refresh(user)
-    return TokenResponse(access_token=create_access_token(str(user.id)))
+    return TokenResponse(access_token=create_access_token(str(user.id), user.token_version))
 
 
 @router.post("/signin", response_model=TokenResponse)
-def signin(payload: SigninRequest, db: Annotated[Session, Depends(get_db)]) -> TokenResponse:
+async def signin(
+    payload: SigninRequest,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> TokenResponse:
+    identifier = _login_identifier(request, payload.email)
+    await enforce_login_throttle(identifier)
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.hashed_password):
+        await record_login_failure(identifier)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email or password is incorrect.")
-    return TokenResponse(access_token=create_access_token(str(user.id)))
+    await clear_login_failures(identifier)
+    return TokenResponse(access_token=create_access_token(str(user.id), user.token_version))
 
 
 @router.post("/forgot-password", response_model=ForgotPasswordResponse)
@@ -85,7 +103,10 @@ def forgot_password(
 
     if not settings.smtp_host:
         db.commit()
-        return ForgotPasswordResponse(message=message, reset_url=reset_url)
+        # Only expose URL in dev/debug to avoid leaking tokens in prod
+        if settings.debug and not settings.is_production:
+            return ForgotPasswordResponse(message=message, reset_url=reset_url)
+        return ForgotPasswordResponse(message=message)
 
     try:
         _send_password_reset_email(user.email, reset_url)
@@ -116,6 +137,7 @@ def reset_password(
     user.hashed_password = get_password_hash(payload.password)
     user.password_reset_token_hash = None
     user.password_reset_expires_at = None
+    user.token_version = (user.token_version or 0) + 1  # invalidate existing JWTs
     db.commit()
     return MessageResponse(message="Password updated. You can sign in with your new password.")
 

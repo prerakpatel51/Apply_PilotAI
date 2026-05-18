@@ -1,16 +1,45 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 ProviderName = Literal["openai", "anthropic"]
 
 
+_COMMON_PASSWORDS = {
+    "password", "password1", "12345678", "123456789", "qwerty123",
+    "letmein1", "welcome1", "admin1234", "iloveyou1", "abc12345",
+}
+
+
+def _validate_password_strength(value: str) -> str:
+    if len(value) < 12:
+        raise ValueError("Password must be at least 12 characters.")
+    if len(value) > 256:
+        raise ValueError("Password too long.")
+    classes = sum([
+        any(c.islower() for c in value),
+        any(c.isupper() for c in value),
+        any(c.isdigit() for c in value),
+        any(not c.isalnum() for c in value),
+    ])
+    if classes < 3:
+        raise ValueError("Password must include 3 of: lowercase, uppercase, digit, symbol.")
+    if value.lower() in _COMMON_PASSWORDS:
+        raise ValueError("Password is too common.")
+    return value
+
+
 class SignupRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=12, max_length=256)
     full_name: str | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class SigninRequest(BaseModel):
@@ -29,7 +58,12 @@ class ForgotPasswordResponse(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(min_length=32)
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=12, max_length=256)
+
+    @field_validator("password")
+    @classmethod
+    def _strength(cls, v: str) -> str:
+        return _validate_password_strength(v)
 
 
 class TokenResponse(BaseModel):

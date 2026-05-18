@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import base64
 import hashlib
+import secrets as _secrets
 
 from cryptography.fernet import Fernet
 from jose import JWTError, jwt
@@ -21,21 +22,29 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(subject: str) -> str:
+def create_access_token(subject: str, token_version: int = 0) -> str:
     settings = get_settings()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": subject, "exp": expire}
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(minutes=settings.access_token_expire_minutes)
+    payload = {
+        "sub": subject,
+        "exp": expire,
+        "iat": now,
+        "jti": _secrets.token_urlsafe(16),
+        "tv": token_version,
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
-def decode_access_token(token: str) -> str | None:
+def decode_access_token(token: str) -> dict | None:
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
     except JWTError:
         return None
-    subject = payload.get("sub")
-    return str(subject) if subject else None
+    if not payload.get("sub"):
+        return None
+    return payload
 
 
 def _fernet() -> Fernet:
