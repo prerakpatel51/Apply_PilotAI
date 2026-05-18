@@ -41,6 +41,8 @@ export function JobResumeAlignmentPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [jdOverride, setJdOverride] = useState("");
+  const [jdOpen, setJdOpen] = useState(false);
 
   const dirty = !!active && latex !== active.latex_source;
 
@@ -90,7 +92,7 @@ export function JobResumeAlignmentPage() {
     setBusy("generate");
     setError("");
     try {
-      const item = await generateResumeForMatch(token, matchId);
+      const item = await generateResumeForMatch(token, matchId, jdOverride);
       setGenerated((items) => [item, ...items]);
       setActive(item);
       setLatex(item.latex_source);
@@ -188,6 +190,37 @@ export function JobResumeAlignmentPage() {
       />
 
       {error && <Banner tone="danger" title="Resume alignment error">{error}</Banner>}
+
+      <Card>
+        <CardHeader
+          eyebrow="Custom job description"
+          title="Paste a JD to override the scraped one"
+          description="Use this when the scraped listing is missing or stale. Pasted text is treated as untrusted data — instructions inside it will not be followed by the agent."
+          action={
+            <Button variant="ghost" size="sm" onClick={() => setJdOpen((v) => !v)}>
+              {jdOpen ? "Hide" : "Show"}
+            </Button>
+          }
+        />
+        {jdOpen && (
+          <CardBody className="space-y-2">
+            <textarea
+              className="h-48 w-full resize-y rounded-xl border border-border bg-bg p-3 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-accent/30 scrollbar-thin"
+              placeholder="Paste the full job description here. Leave empty to use the scraped JD."
+              value={jdOverride}
+              onChange={(e) => setJdOverride(e.target.value.slice(0, 24000))}
+              spellCheck={false}
+              maxLength={24000}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-subtle">
+              <span>{jdOverride.length}/24000 chars</span>
+              {jdOverride && (
+                <Button variant="ghost" size="sm" onClick={() => setJdOverride("")}>Clear</Button>
+              )}
+            </div>
+          </CardBody>
+        )}
+      </Card>
 
       <JobIntelligence match={match} />
 

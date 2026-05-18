@@ -15,7 +15,7 @@ from app.api.dependencies import get_current_user
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.db import GeneratedResume, JobMatch, Resume, ResumeExtraction, User
-from app.schemas.api import GeneratedResumeResponse, GeneratedResumeUpdate, JobMatchResponse
+from app.schemas.api import GeneratedResumeResponse, GeneratedResumeUpdate, JobMatchResponse, ResumeAlignmentRequest
 from app.services.agents import _active_credential, _provider_config
 from app.services.agent_prompts import extra_block, get_prompt_bundle
 from app.services.json_utils import loads_json
@@ -119,6 +119,7 @@ def generate_resume_for_match(
     match_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    payload: ResumeAlignmentRequest | None = None,
     x_provider_api_key: Annotated[str | None, Header(alias="X-Provider-Api-Key")] = None,
 ) -> GeneratedResumeResponse:
     if not x_provider_api_key:
@@ -132,12 +133,13 @@ def generate_resume_for_match(
         select(ResumeExtraction).where(ResumeExtraction.resume_id == resume.id, ResumeExtraction.user_id == current_user.id)
     )
 
+    jd_override = (payload.job_description_override if payload else None) or None
     credential = _active_credential(db, current_user.id)
     provider = make_provider(_provider_config(credential, "resume_alignment", x_provider_api_key))
     latex_source = _strip_markdown_fence(
         provider.generate_text(
             get_prompt_bundle(db, "resume_alignment").system_prompt,
-            _resume_alignment_prompt(db, match, resume, extraction),
+            _resume_alignment_prompt(db, match, resume, extraction, jd_override=jd_override),
         )
     )
     if "\\documentclass" not in latex_source or "\\begin{document}" not in latex_source:
@@ -389,16 +391,29 @@ def _validate_latex_source(source: str) -> None:
             )
 
 
-def _resume_alignment_prompt(db: Session, match: JobMatch, resume: Resume, extraction: ResumeExtraction | None) -> str:
+def _resume_alignment_prompt(
+    db: Session,
+    match: JobMatch,
+    resume: Resume,
+    extraction: ResumeExtraction | None,
+    jd_override: str | None = None,
+) -> str:
     source_resume = _source_resume_text(resume)
     extracted_profile = loads_json(extraction.payload_json, {}) if extraction is not None else {}
     bundle = get_prompt_bundle(db, "resume_alignment")
+    # User-pasted JD treated as untrusted data. Sanitized + wrapped in
+    # untrusted_block so prompt injection inside it is neutralized and
+    # the model is told to treat the body as data only.
+    if jd_override and jd_override.strip():
+        jd_block = untrusted_block("job_description_user_pasted", jd_override, 18000)
+    else:
+        jd_block = untrusted_block("job_description", _job_description(match), 18000)
     prompt = _render_template(
         bundle.task_template,
         {
             "resume_content": untrusted_block("master_resume", source_resume, 24000),
             "extracted_profile": untrusted_block("extracted_profile", str(extracted_profile), 12000),
-            "jd": untrusted_block("job_description", _job_description(match), 18000),
+            "jd": jd_block,
             "locked_template": LOCKED_RESUME_TEMPLATE,
         },
     )

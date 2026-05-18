@@ -201,8 +201,15 @@ export function listGeneratedResumes(token: string, matchId?: number) {
   return request<GeneratedResume[]>(`/resume-alignments${query}`, token);
 }
 
-export function generateResumeForMatch(token: string, matchId: number) {
-  return request<GeneratedResume>(`/resume-alignments/matches/${matchId}`, token, { method: "POST" });
+export function generateResumeForMatch(token: string, matchId: number, jobDescriptionOverride?: string) {
+  const body = jobDescriptionOverride && jobDescriptionOverride.trim()
+    ? JSON.stringify({ job_description_override: jobDescriptionOverride })
+    : undefined;
+  return request<GeneratedResume>(`/resume-alignments/matches/${matchId}`, token, {
+    method: "POST",
+    body,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+  });
 }
 
 export function updateGeneratedResume(token: string, generatedId: number, latexSource: string) {

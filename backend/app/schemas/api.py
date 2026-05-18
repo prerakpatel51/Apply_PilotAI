@@ -259,6 +259,10 @@ class GeneratedResumeUpdate(BaseModel):
     latex_source: str = Field(min_length=1)
 
 
+class ResumeAlignmentRequest(BaseModel):
+    job_description_override: str | None = Field(default=None, max_length=24000)
+
+
 class ProviderCredentialPayload(BaseModel):
     provider: ProviderName
     api_key: str | None = Field(default=None, min_length=8)
