@@ -266,6 +266,36 @@ def _match_response(match: JobMatch) -> JobMatchResponse:
 
 
 def _job_response(job) -> JobListingResponse:
+    description = (job.description or "").strip()
+    # Backfill from raw_json for legacy rows where ranking step stripped the
+    # JD before persistence.
+    if not description:
+        raw = loads_json(job.raw_json or "{}", {}) if hasattr(job, "raw_json") else {}
+        discovery = raw.get("discovery") if isinstance(raw, dict) else {}
+        ranking = raw.get("ranking") if isinstance(raw, dict) else {}
+        parts: list[str] = []
+        for src in (discovery or {}), (ranking or {}):
+            if not isinstance(src, dict):
+                continue
+            d = str(src.get("description") or "").strip()
+            if d and d not in parts:
+                parts.append(d)
+            ex = str(src.get("source_excerpt") or "").strip()
+            if ex and ex not in parts:
+                parts.append(f"Evidence from listing: {ex}")
+        # Older rows have raw_json as the bare ranking item (no nested keys).
+        if isinstance(raw, dict) and "description" in raw:
+            d = str(raw.get("description") or "").strip()
+            if d and d not in parts:
+                parts.append(d)
+        if isinstance(raw, dict) and "source_excerpt" in raw:
+            ex = str(raw.get("source_excerpt") or "").strip()
+            if ex and ex not in parts:
+                parts.append(f"Evidence from listing: {ex}")
+        if parts:
+            description = "\n\n".join(parts)
+        else:
+            description = "No description was captured. Score was based on title, company, location and your profile."
     return JobListingResponse(
         id=job.id,
         title=job.title,
@@ -275,5 +305,5 @@ def _job_response(job) -> JobListingResponse:
         source=job.source,
         posted_at=job.posted_at,
         application_status=job.application_status,
-        description=job.description,
+        description=description,
     )

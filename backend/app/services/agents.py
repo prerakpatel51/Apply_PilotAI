@@ -363,7 +363,7 @@ def _run_pipeline(db: Session, run: SearchRun, api_key: str) -> None:
     if not matches:
         raise ValueError("The ranking agent did not return any active matching jobs.")
 
-    _persist_matches(db, run, matches)
+    _persist_matches(db, run, matches, jobs)
 
 
 def _active_credential(db: Session, user_id: int) -> ProviderCredential:
@@ -394,10 +394,30 @@ def _provider_config(credential: ProviderCredential, task: str | None = None, ap
     )
 
 
-def _persist_matches(db: Session, run: SearchRun, matches: list[dict[str, Any]]) -> None:
+def _persist_matches(
+    db: Session,
+    run: SearchRun,
+    matches: list[dict[str, Any]],
+    discovery_jobs: list[dict[str, Any]] | None = None,
+) -> None:
     existing_seen_ids = {
         row[0] for row in db.execute(select(UserSeenJob.job_id).where(UserSeenJob.user_id == run.user_id)).all()
     }
+
+    # Index discovery output by URL and (company, title) so we can backfill
+    # description / source_excerpt that the ranking step strips out.
+    discovery_by_url: dict[str, dict[str, Any]] = {}
+    discovery_by_ct: dict[tuple[str, str], dict[str, Any]] = {}
+    for d in discovery_jobs or []:
+        if not isinstance(d, dict):
+            continue
+        u = str(d.get("url") or "").strip().lower()
+        if u:
+            discovery_by_url[u] = d
+        t = str(d.get("title") or "").strip().lower()
+        c = str(d.get("company") or "").strip().lower()
+        if t and c:
+            discovery_by_ct[(c, t)] = d
 
     for item in matches:
         job_payload = item.get("job") if isinstance(item.get("job"), dict) else item
@@ -408,6 +428,12 @@ def _persist_matches(db: Session, run: SearchRun, matches: list[dict[str, Any]])
         company = str(job_payload.get("company") or "").strip()
         if not url or not title or not company:
             continue
+
+        discovery_match = (
+            discovery_by_url.get(url.lower())
+            or discovery_by_ct.get((company.lower(), title.lower()))
+            or {}
+        )
 
         fingerprint = fingerprint_job(url, title, company, str(job_payload.get("location") or ""))
         job = db.scalar(select(JobListing).where(JobListing.fingerprint == fingerprint))
@@ -422,8 +448,17 @@ def _persist_matches(db: Session, run: SearchRun, matches: list[dict[str, Any]])
         job.source = str(job_payload.get("source") or "")
         job.posted_at = str(job_payload.get("posted_at") or "")
         job.application_status = str(job_payload.get("application_status") or "")
-        job.description = str(job_payload.get("description") or item.get("description") or "")
-        job.raw_json = dumps_json(item)
+        description = (
+            str(job_payload.get("description") or "").strip()
+            or str(item.get("description") or "").strip()
+            or str(discovery_match.get("description") or "").strip()
+        )
+        excerpt = str(discovery_match.get("source_excerpt") or "").strip()
+        if excerpt and excerpt not in description:
+            description = f"{description}\n\nEvidence from listing: {excerpt}".strip()
+        job.description = description
+        merged_raw = {"ranking": item, "discovery": discovery_match}
+        job.raw_json = dumps_json(merged_raw)
         db.flush()
 
         previously_seen = bool(item.get("previously_seen")) or job.id in existing_seen_ids
