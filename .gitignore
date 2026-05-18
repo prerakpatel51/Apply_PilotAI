@@ -17,3 +17,7 @@ deploy/state.env
 # Deploy secrets
 deploy/*.env
 !deploy/*.env.example
+
+# Personal deploy notes — never commit
+deploy/DEPLOY_NOTES.txt
+deploy/*.notes.txt
