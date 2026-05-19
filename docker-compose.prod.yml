@@ -61,6 +61,8 @@ services:
       context: ./backend
     restart: unless-stopped
     command: ["arq", "app.worker.WorkerSettings"]
+    healthcheck:
+      disable: true
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}

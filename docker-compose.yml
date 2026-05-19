@@ -49,6 +49,8 @@ services:
     build:
       context: ./backend
     command: ["arq", "app.worker.WorkerSettings"]
+    healthcheck:
+      disable: true
     environment:
       DATABASE_URL: postgresql+psycopg://api_applier:api_applier@db:5432/api_applier
       REDIS_URL: redis://redis:6379/0
