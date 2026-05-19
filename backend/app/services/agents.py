@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
-from typing import Any
+from typing import Any, TypedDict
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from langchain_core.runnables import RunnableLambda
+from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -24,6 +27,19 @@ from app.services.agent_prompts import extra_block, get_prompt_bundle
 from app.services.json_utils import dumps_json, loads_json
 from app.services.prompt_injection import sanitize_untrusted_text, untrusted_block
 from app.services.providers import LLMProviderConfig, make_provider
+
+
+class JobSearchGraphState(TypedDict, total=False):
+    db: Session
+    run: SearchRun
+    api_key: str
+    profile: UserProfile
+    resume: Resume
+    credential: ProviderCredential
+    keywords: dict[str, Any]
+    jobs: list[dict[str, Any]]
+    seen_jobs: list[dict[str, str]]
+    matches: list[dict[str, Any]]
 
 
 class KeywordAgent:
@@ -323,6 +339,31 @@ def run_job_search_pipeline(run_id: int, api_key: str) -> None:
 
 
 def _run_pipeline(db: Session, run: SearchRun, api_key: str) -> None:
+    graph = build_job_search_graph()
+    graph.invoke({"db": db, "run": run, "api_key": api_key})
+
+
+@lru_cache(maxsize=1)
+def build_job_search_graph() -> Any:
+    graph = StateGraph(JobSearchGraphState)
+    graph.add_node("load_context", RunnableLambda(_load_search_context_node))
+    graph.add_node("generate_keywords", RunnableLambda(_generate_keywords_node))
+    graph.add_node("search_jobs", RunnableLambda(_search_jobs_node))
+    graph.add_node("rank_jobs", RunnableLambda(_rank_jobs_node))
+    graph.add_node("persist_matches", RunnableLambda(_persist_matches_node))
+
+    graph.add_edge(START, "load_context")
+    graph.add_edge("load_context", "generate_keywords")
+    graph.add_edge("generate_keywords", "search_jobs")
+    graph.add_edge("search_jobs", "rank_jobs")
+    graph.add_edge("rank_jobs", "persist_matches")
+    graph.add_edge("persist_matches", END)
+    return graph.compile()
+
+
+def _load_search_context_node(state: JobSearchGraphState) -> JobSearchGraphState:
+    db = state["db"]
+    run = state["run"]
     profile = db.scalar(select(UserProfile).where(UserProfile.user_id == run.user_id))
     if profile is None or not profile.target_role:
         raise ValueError("Complete the target role profile before searching.")
@@ -334,13 +375,32 @@ def _run_pipeline(db: Session, run: SearchRun, api_key: str) -> None:
         raise ValueError("Upload a readable resume before searching.")
 
     credential = _active_credential(db, run.user_id)
+    return {"profile": profile, "resume": resume, "credential": credential}
 
+
+def _generate_keywords_node(state: JobSearchGraphState) -> JobSearchGraphState:
+    db = state["db"]
+    run = state["run"]
+    profile = state["profile"]
+    resume = state["resume"]
+    credential = state["credential"]
+    api_key = state["api_key"]
     keyword_provider = make_provider(_provider_config(credential, "keyword_generation", api_key))
     keywords = KeywordAgent(keyword_provider, db).run(profile, resume)
     run.keywords_json = dumps_json(keywords)
     _add_token_usage(run, keyword_provider)
     db.commit()
+    return {"keywords": keywords}
 
+
+def _search_jobs_node(state: JobSearchGraphState) -> JobSearchGraphState:
+    db = state["db"]
+    run = state["run"]
+    profile = state["profile"]
+    resume = state["resume"]
+    credential = state["credential"]
+    keywords = state["keywords"]
+    api_key = state["api_key"]
     search_provider = make_provider(_provider_config(credential, "job_search", api_key))
     run.model = search_provider.config.model
     search_payload = JobSearchAgent(search_provider, db).run(profile, resume, keywords)
@@ -353,7 +413,17 @@ def _run_pipeline(db: Session, run: SearchRun, api_key: str) -> None:
         if note:
             msg = f"{msg} Agent note: {note[:600]}"
         raise ValueError(msg)
+    return {"jobs": jobs}
 
+
+def _rank_jobs_node(state: JobSearchGraphState) -> JobSearchGraphState:
+    db = state["db"]
+    run = state["run"]
+    profile = state["profile"]
+    resume = state["resume"]
+    credential = state["credential"]
+    jobs = state["jobs"]
+    api_key = state["api_key"]
     seen_jobs = _seen_jobs_for_prompt(db, run.user_id)
     ranking_provider = make_provider(_provider_config(credential, "ranking", api_key))
     ranking_payload = VerificationRankingAgent(ranking_provider, db).run(profile, resume, jobs, seen_jobs)
@@ -362,8 +432,16 @@ def _run_pipeline(db: Session, run: SearchRun, api_key: str) -> None:
     matches = _as_list(ranking_payload.get("matches"))
     if not matches:
         raise ValueError("The ranking agent did not return any active matching jobs.")
+    return {"seen_jobs": seen_jobs, "matches": matches}
 
+
+def _persist_matches_node(state: JobSearchGraphState) -> JobSearchGraphState:
+    db = state["db"]
+    run = state["run"]
+    matches = state["matches"]
+    jobs = state["jobs"]
     _persist_matches(db, run, matches, jobs)
+    return {}
 
 
 def _active_credential(db: Session, user_id: int) -> ProviderCredential:
