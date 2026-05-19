@@ -28,6 +28,7 @@ The product is built for a bring-your-own-key model: users connect their own Ope
 | Backend API | FastAPI, SQLAlchemy, Pydantic |
 | Database | PostgreSQL in Docker, SQLite fallback for local backend-only runs |
 | Queue | Redis + ARQ worker |
+| Agent Orchestration | LangGraph state graph with LangChain runnable nodes |
 | LLM Providers | OpenAI Responses API, Anthropic Messages API |
 | Resume Compilation | TeX Live / `pdflatex` inside the backend image |
 | Auth | Email/password with JWT bearer tokens |
@@ -59,8 +60,14 @@ The product is built for a bring-your-own-key model: users connect their own Ope
                                                     │
                                                     ▼
                                           ┌──────────────────┐
+                                          │ LangGraph        │
                                           │ Agent Pipeline   │
+                                          └────────┬─────────┘
+                                                   │
+                                                   ▼
+                                          ┌──────────────────┐
                                           │ OpenAI/Anthropic │
+                                          │ provider calls   │
                                           └────────┬─────────┘
                                                    │
                                                    ▼
@@ -94,7 +101,7 @@ backend/app
 ├── models/
 │   └── db.py                       # ORM models
 ├── services/
-│   ├── agents.py                   # keyword/search/ranking/resume extraction pipeline
+│   ├── agents.py                   # LangGraph search pipeline plus agent implementations
 │   ├── agent_prompts.py            # default/admin-editable prompts
 │   ├── prompt_injection.py         # untrusted text sanitization
 │   ├── providers.py                # OpenAI/Anthropic adapters
@@ -146,6 +153,18 @@ The frontend is designed mobile-first:
 ---
 
 ## Agent Pipeline
+
+The job-search workflow runs as a cached LangGraph `StateGraph` in the ARQ worker. Each graph node is wrapped with LangChain's `RunnableLambda`, while the model calls still flow through the app's provider adapters so user API-key handling, provider web search, and token accounting remain consistent.
+
+Current search graph:
+
+```text
+load_context
+  -> generate_keywords
+  -> search_jobs
+  -> rank_jobs
+  -> persist_matches
+```
 
 ### 1. Resume Extraction Agent
 
